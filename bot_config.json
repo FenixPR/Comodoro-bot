@@ -1,0 +1,54 @@
+{
+    "trading": {
+        "symbol": "R_100",
+        "stake_amount": "0.6",
+        "max_loss": 10.0,
+        "target_profit": "100",
+        "martingale_multiplier": "3.5",
+        "signal_cooldown": 60,
+        "max_reentries": 2,
+        "martingale_max_consecutive_losses": "5"
+    },
+    "strategy": {
+        "target_digits": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9
+        ],
+        "confidence_threshold": 0.6,
+        "use_martingale": true,
+        "risk_management": true
+    },
+    "notifications": {
+        "send_statistics": true,
+        "statistics_interval": 3600,
+        "send_errors": true,
+        "send_startup": true
+    },
+    "advanced": {
+        "max_signals_per_hour": 10,
+        "enable_backtesting": false,
+        "log_level": "INFO",
+        "auto_restart": true
+    },
+    "telegram": {
+        "bot_token": "",
+        "chat_id": ""
+    },
+    "deriv": {
+        "app_id": "",
+        "api_token": ""
+    },
+    "ai": {
+        "openai_api_key": "AIzaSyA5lrEU5jBH5KwLxJ4MkSKLVha0un3D0X8",
+        "openai_base_url": "https://api.openai.com/v1",
+        "model": "gemini-2.5-flash"
+    }
+}

@@ -3,3 +3,4 @@ websocket-client
 python-dotenv
 requests
 aiohttp
+flask

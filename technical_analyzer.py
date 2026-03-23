@@ -1,87 +1,62 @@
 import logging
-import time
-from typing import Optional, Dict, Any, List
-from technical_analyzer import TechnicalAnalyzer
 
-class TradingStrategy:
-    def __init__(self, config_manager):
-        self.config_manager = config_manager
+class TechnicalAnalyzer:
+    def __init__(self, rsi_period=14):
         self.logger = logging.getLogger(__name__)
-        self.tech_analyzer = TechnicalAnalyzer(rsi_period=14)
+        self.rsi_period = rsi_period
 
-        # Configurações base
-        self.initial_stake = float(self.config_manager.get('trading.stake_amount', 0.6))
-        self.martingale_multiplier = float(self.config_manager.get('trading.martingale_multiplier', 3.5))
-        self.martingale_max_consecutive_losses = int(self.config_manager.get('trading.martingale_max_consecutive_losses', 5))
-
-        self.current_stake = self.initial_stake
-        self.tick_histories: Dict[str, List[float]] = {}
-        self.global_pause_until = 0 
-        
-        self.reset()
-
-    def reset(self):
-        """Reseta para o estado inicial."""
-        self.current_stake = self.initial_stake
-        self.tick_histories.clear()
-
-    def analyze_tick(self, tick_data: dict) -> Optional[Dict[str, Any]]:
-        if time.time() < self.global_pause_until:
+    def calculate_rsi(self, prices):
+        """Calcula o RSI baseado em uma lista de preços."""
+        if len(prices) < self.rsi_period + 1:
             return None
+        
+        deltas = [prices[i] - prices[i-1] for i in range(1, len(prices))]
+        gains = [d if d > 0 else 0 for d in deltas]
+        losses = [-d if d < 0 else 0 for d in deltas]
 
-        symbol = tick_data.get('symbol', 'Unknown')
-        quote = float(tick_data.get('quote', 0))
-        
-        if symbol not in self.tick_histories:
-            self.tick_histories[symbol] = []
-        
-        self.tick_histories[symbol].append(quote)
-        
-        # Sniper precisa de um histórico sólido para calcular o RSI corretamente
-        if len(self.tick_histories[symbol]) > 50:
-            self.tick_histories[symbol].pop(0)
+        avg_gain = sum(gains[-self.rsi_period:]) / self.rsi_period
+        avg_loss = sum(losses[-self.rsi_period:]) / self.rsi_period
 
-        if len(self.tick_histories[symbol]) >= 30:
-            analysis = self.tech_analyzer.analyze_trend(self.tick_histories[symbol])
-            score = analysis.get("confianca_score", 0)
+        if avg_loss == 0: return 100.0
+        
+        rs = avg_gain / avg_loss
+        return 100 - (100 / (1 + rs))
+
+    def analyze_trend(self, prices):
+        """Lógica Sniper: Filtra apenas entradas de altíssima probabilidade."""
+        rsi = self.calculate_rsi(prices)
+        if rsi is None:
+            return {"status": "WAIT", "confianca_score": 0}
+
+        score = 0
+        status = "NEUTRAL"
+
+        # FILTRO SNIPER: Níveis muito mais rigorosos (82/18) para reduzir losses
+        if rsi >= 82: 
+            status = "OVERBOUGHT"
+            score = 7 # Score base para Sniper
+            if rsi >= 88: score += 2 # Exaustão severa
+            if rsi >= 93: score += 1 # "Certeza" estatística máxima
             
-            # SÓ ENTRA SE O SCORE FOR 7 OU MAIS (FILTRO SNIPER)
-            if score >= 7:
-                operational_stake = self.current_stake
-                
-                # LÓGICA DE CONFIANÇA: Se score >= 8, dobra a entrada (ex: 0.60 -> 1.20)
-                if score >= 8:
-                    operational_stake = round(self.current_stake * 2.0, 2)
-                    self.logger.info(f"🎯 Sniper focado! Confiança Score {score}. Aumentando stake para ${operational_stake}")
+        elif rsi <= 18:
+            status = "OVERSOLD"
+            score = 7
+            if rsi <= 12: score += 2
+            if rsi <= 7: score += 1
 
-                if analysis["status"] == "OVERBOUGHT":
-                    return self._create_trade_signal("DIGITUNDER", symbol, 8, operational_stake)
-                elif analysis["status"] == "OVERSOLD":
-                    return self._create_trade_signal("DIGITOVER", symbol, 1, operational_stake)
-        
-        return None
+        # Validação de micro-tendência (os últimos 3 ticks devem confirmar a direção)
+        if len(prices) >= 3:
+            if status == "OVERBOUGHT" and prices[-1] > prices[-2] > prices[-3]:
+                score = min(10, score + 1)
+            elif status == "OVERSOLD" and prices[-1] < prices[-2] < prices[-3]:
+                score = min(10, score + 1)
 
-    def on_trade_result(self, result: str):
-        """Gerencia o pós-operação com emojis e pausas."""
-        current_time = time.time()
-        self.tick_histories.clear() # Limpa para nova análise Sniper do zero
+        # Se o score for menor que 7, o Sniper não atira
+        if score < 7: status = "NEUTRAL"
 
-        if result == "WIN":
-            self.logger.info("--- [💰💰💰 WIN!] Alvo atingido. Resetando stake. ---")
-            self.global_pause_until = current_time + 30
-            self.current_stake = self.initial_stake
-        else:
-            self.logger.info("--- [😡 LOSS] Falha no disparo. Iniciando recuperação. ---")
-            self.global_pause_until = current_time + 60 
-            # Martingale aplicado sobre o stake base
-            self.current_stake = round(self.current_stake * self.martingale_multiplier, 2)
-
-    def _create_trade_signal(self, contract_type: str, symbol: str, barrier: Any, amount: float) -> Dict[str, Any]:
         return {
-            "contract_type": contract_type,
-            "amount": float(amount),
-            "barrier": str(barrier),
-            "duration": 1,
-            "duration_unit": "t",
-            "symbol": symbol
+            "status": status,
+            "rsi": rsi,
+            "confianca_score": score,
+            "reason": f"Sniper Mode: {status} (Score {score})"
         }

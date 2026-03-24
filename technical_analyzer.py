@@ -23,7 +23,10 @@ class TechnicalAnalyzer:
         return 100 - (100 / (1 + rs))
 
     def analyze_trend(self, prices):
-        """Lógica Sniper: Filtra apenas entradas de altíssima probabilidade."""
+        """
+        Lógica Sniper: Filtra apenas entradas de altíssima probabilidade (Score 0-10).
+        Focado em reduzir drasticamente o número de Losses.
+        """
         rsi = self.calculate_rsi(prices)
         if rsi is None:
             return {"status": "WAIT", "confianca_score": 0}
@@ -31,12 +34,12 @@ class TechnicalAnalyzer:
         score = 0
         status = "NEUTRAL"
 
-        # FILTRO SNIPER: Níveis muito mais rigorosos (82/18) para reduzir losses
+        # GATILHO SNIPER: Níveis rigorosos (82/18) para maior assertividade
         if rsi >= 82: 
             status = "OVERBOUGHT"
-            score = 7 # Score base para Sniper
-            if rsi >= 88: score += 2 # Exaustão severa
-            if rsi >= 93: score += 1 # "Certeza" estatística máxima
+            score = 7 # Pontuação base para Sniper
+            if rsi >= 88: score += 2 # Exaustão severa do preço
+            if rsi >= 93: score += 1 # Ponto de reversão estatística máxima
             
         elif rsi <= 18:
             status = "OVERSOLD"
@@ -44,14 +47,14 @@ class TechnicalAnalyzer:
             if rsi <= 12: score += 2
             if rsi <= 7: score += 1
 
-        # Validação de micro-tendência (os últimos 3 ticks devem confirmar a direção)
+        # Filtro de micro-tendência: Confirmação de direção nos últimos ticks
         if len(prices) >= 3:
-            if status == "OVERBOUGHT" and prices[-1] > prices[-2] > prices[-3]:
+            if status == "OVERBOUGHT" and prices[-1] > prices[-2]:
                 score = min(10, score + 1)
-            elif status == "OVERSOLD" and prices[-1] < prices[-2] < prices[-3]:
+            elif status == "OVERSOLD" and prices[-1] < prices[-2]:
                 score = min(10, score + 1)
 
-        # Se o score for menor que 7, o Sniper não atira
+        # Se o score for menor que 7, o Sniper não dispara a ordem
         if score < 7: status = "NEUTRAL"
 
         return {

@@ -48,7 +48,7 @@
         "api_token": ""
     },
     "ai": {
-        "openai_api_key": "AIzaSyA5lrEU5jBH5KwLxJ4MkSKLVha0un3D0X8",
+        "openai_api_key": "",
         "openai_base_url": "https://api.openai.com/v1",
         "model": "gemini-2.5-flash"
     }

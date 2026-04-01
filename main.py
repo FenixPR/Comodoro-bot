@@ -18,6 +18,7 @@ app = Flask('')
 def home(): return "Kratos Xeque-Mate Online!", 200
 
 def run_web():
+    # Render usa a variável de ambiente PORT
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
@@ -36,10 +37,19 @@ class TradingBotMain:
         tg_token = os.getenv("TELEGRAM_BOT_TOKEN") or self.config_manager.get("telegram.bot_token")
         tg_chat_id = os.getenv("TELEGRAM_CHAT_ID") or self.config_manager.get("telegram.chat_id")
 
-        self.deriv_api = DerivAPI(app_id=deriv_app_id, api_token=deriv_token)
-        self.telegram_bot = TelegramTradingBot(bot_token=tg_token, chat_id=tg_chat_id, 
-                                             start_callback=self.start_trading, stop_callback=self.stop_trading)
         self.trading_strategy = TradingStrategy(self.config_manager)
+        
+        # Conecta os callbacks do Telegram com a lógica da estratégia
+        self.telegram_bot = TelegramTradingBot(
+            bot_token=tg_token, 
+            chat_id=tg_chat_id, 
+            start_callback=self.start_trading, 
+            stop_callback=self.stop_trading,
+            profit_callback=self.set_target_profit,
+            loss_callback=self.set_max_loss
+        )
+        
+        self.deriv_api = DerivAPI(app_id=deriv_app_id, api_token=deriv_token)
         
         self.total_profit = 0.0
         self.total_wins = 0
@@ -55,7 +65,7 @@ class TradingBotMain:
 
     async def start(self):
         try:
-            if not self.deriv_api.connect(): raise Exception("Erro Deriv")
+            if not self.deriv_api.connect(): raise Exception("Erro ao conectar na Deriv")
             self.deriv_api.set_callback("tick", self.on_tick_received, asyncio.get_running_loop())
             self.deriv_api.set_callback("trade_result", self.on_trade_result, asyncio.get_running_loop())
 
@@ -65,10 +75,13 @@ class TradingBotMain:
             asyncio.create_task(self.telegram_bot.run_polling())
             asyncio.create_task(self.hourly_report_loop())
             
+            self.logger.info("Bot Comodoro iniciado e pronto!")
+            
             while not self.shutdown_requested:
                 if self.is_running and self.is_paused and time.time() >= self.pause_end_time:
                     self.is_paused = False
-                    self.trading_strategy.reset()
+                    # Note: trading_strategy.reset() reseta o lucro do dia, talvez não seja o ideal aqui
+                    # self.trading_strategy.reset() 
                 await asyncio.sleep(1)
         finally: self.stop()
 
@@ -91,13 +104,29 @@ class TradingBotMain:
         self.total_profit += profit
         if result == "WIN": self.total_wins += 1
         else: self.total_losses += 1
+        
         await self.telegram_bot.send_result_notification(result, profit, self.total_profit)
-        self.trading_strategy.on_trade_result(result)
+        self.trading_strategy.on_trade_result(result, profit)
         self.is_trade_in_progress = False
 
-    async def start_trading(self): self.is_running = True
-    async def stop_trading(self): self.is_running = False
-    def stop(self): self.shutdown_requested = True; self.deriv_api.disconnect()
+    async def start_trading(self): 
+        self.is_running = True
+        self.logger.info("Trading iniciado via Telegram")
+
+    async def stop_trading(self): 
+        self.is_running = False
+        self.logger.info("Trading parado via Telegram")
+
+    async def set_target_profit(self, val: float):
+        self.trading_strategy.set_target_profit(val)
+
+    async def set_max_loss(self, val: float):
+        self.trading_strategy.set_max_loss(val)
+
+    def stop(self): 
+        self.shutdown_requested = True
+        self.deriv_api.disconnect()
+        self.logger.info("Bot desligado.")
 
 if __name__ == "__main__":
     Thread(target=run_web, daemon=True).start()

@@ -16,7 +16,8 @@ class TradingStrategy:
         self.current_level = 0
         self.current_stake = self.initial_stake
 
-        self.max_daily_loss = float(self.config_manager.get('trading.max_daily_loss', 8.0))   # % da banca
+        self.max_daily_loss = float(self.config_manager.get('trading.max_loss', 8.0))   # Valor em USD
+        self.target_profit = float(self.config_manager.get('trading.target_profit', 100.0)) # Valor em USD
         self.max_daily_trades = int(self.config_manager.get('trading.max_daily_trades', 15))
         self.daily_pnl = 0.0
         self.daily_trades = 0
@@ -33,13 +34,34 @@ class TradingStrategy:
         self.daily_trades = 0
         self.last_reset_day = date.today()
 
+    def set_max_loss(self, val: float):
+        self.max_daily_loss = val
+        self.logger.info(f"Stop Loss atualizado para: ${val:.2f}")
+
+    def set_target_profit(self, val: float):
+        self.target_profit = val
+        self.logger.info(f"Meta de lucro atualizada para: ${val:.2f}")
+
     def check_daily_risk(self):
         if date.today() != self.last_reset_day:
             self.reset()
-        if self.daily_trades >= self.max_daily_trades or self.daily_pnl <= -self.max_daily_loss:
-            self.logger.warning("🛑 Limite diário atingido (trades ou loss). Bot pausado até amanhã.")
+        
+        # Verifica se atingiu stop loss ou meta de lucro
+        if self.daily_pnl <= -self.max_daily_loss:
+            self.logger.warning(f"🛑 Stop Loss atingido (${self.daily_pnl:.2f}). Bot pausado até amanhã.")
             self.global_pause_until = time.time() + 86400  # 24h
             return False
+        
+        if self.daily_pnl >= self.target_profit:
+            self.logger.info(f"🎯 Meta de lucro atingida (${self.daily_pnl:.2f})! Bot pausado até amanhã.")
+            self.global_pause_until = time.time() + 86400  # 24h
+            return False
+
+        if self.daily_trades >= self.max_daily_trades:
+            self.logger.warning("🛑 Limite diário de trades atingido. Bot pausado até amanhã.")
+            self.global_pause_until = time.time() + 86400  # 24h
+            return False
+            
         return True
 
     def analyze_tick(self, tick_data: dict) -> Optional[Dict[str, Any]]:

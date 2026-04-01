@@ -7,7 +7,7 @@
         "martingale_multiplier": "2.0",
         "signal_cooldown": 60,
         "max_reentries": 2,
-        "max_recovery_attempts": 2
+        "max_recovery_attempts": 2,
         "martingale_max_consecutive_losses": "5"
     },
     "strategy": {

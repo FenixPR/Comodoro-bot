@@ -1,13 +1,12 @@
 {
     "trading": {
         "symbol": "R_100",
-        "stake_amount": "0.60",
+        "stake_amount": "0.6",
         "max_loss": 10.0,
         "target_profit": "100",
-        "martingale_multiplier": "2.0",
+        "martingale_multiplier": "3.5",
         "signal_cooldown": 60,
         "max_reentries": 2,
-        "max_recovery_attempts": 2,
         "martingale_max_consecutive_losses": "5"
     },
     "strategy": {
@@ -48,7 +47,7 @@
         "api_token": ""
     },
     "ai": {
-        "openai_api_key": "",
+        "openai_api_key": "AIzaSyA5lrEU5jBH5KwLxJ4MkSKLVha0un3D0X8",
         "openai_base_url": "https://api.openai.com/v1",
         "model": "gemini-2.5-flash"
     }

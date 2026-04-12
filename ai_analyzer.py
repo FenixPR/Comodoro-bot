@@ -10,7 +10,7 @@ class AIAnalyzer:
         self.config_manager = config_manager
         self.api_key = self.config_manager.get("ai.openai_api_key")
         base_url_env = self.config_manager.get("ai.openai_base_url", "https://api.openai.com/v1")
-        self.base_url = f"{base_url_env.rstrip('/')}/chat/completions"
+        self.base_url = f"{base_url_env.rstrip("/")}/chat/completions"
         self.model = self.config_manager.get("ai.model", "gemini-2.5-flash")
 
     def analyze_market(self, ticks: List[float], symbol: str) -> Optional[Dict]:
@@ -84,13 +84,9 @@ class AIAnalyzer:
             result = json.loads(content)
             
             # Log detalhado da decisão da IA
-            recommendation = result.get("recommendation")
-            confidence = float(result.get("confidence", 0)) * 100
-            summary = result.get("analysis_summary", "N/A")
-            
             self.logger.info(f"--- ANÁLISE IA [{symbol}] ---")
-            self.logger.info(f"Decisão: {recommendation} | Confiança: {confidence:.1f}%")
-            self.logger.info(f"Motivo: {summary}")
+            self.logger.info(f"Decisão: {result.get("recommendation")} | Confiança: {float(result.get("confidence", 0))*100:.1f}%")
+            self.logger.info(f"Motivo: {result.get("analysis_summary", "N/A")}")
             
             return result
         except Exception as e:

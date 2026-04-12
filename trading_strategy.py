@@ -1,6 +1,5 @@
 import logging
 import time
-from datetime import datetime, date
 from typing import Optional, Dict, Any, List
 from technical_analyzer import TechnicalAnalyzer
 
@@ -8,112 +7,83 @@ class TradingStrategy:
     def __init__(self, config_manager):
         self.config_manager = config_manager
         self.logger = logging.getLogger(__name__)
-        self.tech_analyzer = TechnicalAnalyzer()
+        self.tech_analyzer = TechnicalAnalyzer(rsi_period=14)
 
-        # === CONFIGURAÇÕES SEGURAS ===
-        self.initial_stake = float(self.config_manager.get('trading.stake_amount', 0.60))
-        self.sequence_1236 = [1.0, 3.0, 2.0, 6.0]   # Progressão 1-3-2-6
-        self.current_level = 0
+        # Configurações base
+        self.initial_stake = float(self.config_manager.get('trading.stake_amount', 0.6))
+        self.martingale_multiplier = float(self.config_manager.get('trading.martingale_multiplier', 3.5))
+        self.martingale_max_consecutive_losses = int(self.config_manager.get('trading.martingale_max_consecutive_losses', 5))
+
         self.current_stake = self.initial_stake
-
-        self.max_daily_loss = float(self.config_manager.get('trading.max_loss', 8.0))   # Valor em USD
-        self.target_profit = float(self.config_manager.get('trading.target_profit', 100.0)) # Valor em USD
-        self.max_daily_trades = int(self.config_manager.get('trading.max_daily_trades', 15))
-        self.daily_pnl = 0.0
-        self.daily_trades = 0
-        self.last_reset_day = date.today()
-
         self.tick_histories: Dict[str, List[float]] = {}
-        self.global_pause_until = 0
+        self.global_pause_until = 0 
+        self.consecutive_losses = 0
+        
         self.reset()
 
     def reset(self):
-        self.current_level = 0
+        """Reseta para o estado inicial."""
         self.current_stake = self.initial_stake
-        self.daily_pnl = 0.0
-        self.daily_trades = 0
-        self.last_reset_day = date.today()
-
-    def set_max_loss(self, val: float):
-        self.max_daily_loss = val
-        self.logger.info(f"Stop Loss atualizado para: ${val:.2f}")
-
-    def set_target_profit(self, val: float):
-        self.target_profit = val
-        self.logger.info(f"Meta de lucro atualizada para: ${val:.2f}")
-
-    def check_daily_risk(self):
-        if date.today() != self.last_reset_day:
-            self.reset()
-        
-        # Verifica se atingiu stop loss ou meta de lucro
-        if self.daily_pnl <= -self.max_daily_loss:
-            self.logger.warning(f"🛑 Stop Loss atingido (${self.daily_pnl:.2f}). Bot pausado até amanhã.")
-            self.global_pause_until = time.time() + 86400  # 24h
-            return False
-        
-        if self.daily_pnl >= self.target_profit:
-            self.logger.info(f"🎯 Meta de lucro atingida (${self.daily_pnl:.2f})! Bot pausado até amanhã.")
-            self.global_pause_until = time.time() + 86400  # 24h
-            return False
-
-        if self.daily_trades >= self.max_daily_trades:
-            self.logger.warning("🛑 Limite diário de trades atingido. Bot pausado até amanhã.")
-            self.global_pause_until = time.time() + 86400  # 24h
-            return False
-            
-        return True
+        self.tick_histories.clear()
+        self.consecutive_losses = 0
 
     def analyze_tick(self, tick_data: dict) -> Optional[Dict[str, Any]]:
         if time.time() < self.global_pause_until:
             return None
-        if not self.check_daily_risk():
-            return None
 
         symbol = tick_data.get('symbol', 'Unknown')
         quote = float(tick_data.get('quote', 0))
-
+        
         if symbol not in self.tick_histories:
             self.tick_histories[symbol] = []
+        
         self.tick_histories[symbol].append(quote)
+        
+        # Sniper precisa de um histórico sólido para calcular o RSI corretamente
+        if len(self.tick_histories[symbol]) > 50:
+            self.tick_histories[symbol].pop(0)
 
-        if len(self.tick_histories[symbol]) >= 60:
-            analysis = self.tech_analyzer.analyze_trend(symbol, self.tick_histories[symbol], quote)
-
-            if analysis["status"] != "NEUTRAL" and analysis["confianca_score"] >= 9.5:
-                operational_stake = round(self.initial_stake * self.sequence_1236[self.current_level], 2)
-
-                self.logger.info(f"🚀 SINAL CERTO! {analysis['status']} | Confluências: {analysis['confluences']} | Score: {analysis['confianca_score']} | Stake: ${operational_stake}")
+        if len(self.tick_histories[symbol]) >= 30:
+            analysis = self.tech_analyzer.analyze_trend(self.tick_histories[symbol])
+            score = analysis.get("confianca_score", 0)
+            
+            # SÓ ENTRA SE O SCORE FOR 7 OU MAIS (FILTRO SNIPER)
+            if score >= 7:
+                operational_stake = self.current_stake
+                
+                # LÓGICA DE CONFIANÇA: Se score >= 8, dobra a entrada (ex: 0.60 -> 1.20)
+                if score >= 8:
+                    operational_stake = round(self.current_stake * 2.0, 2)
+                    self.logger.info(f"🎯 Sniper focado! Confiança Score {score}. Aumentando stake para ${operational_stake}")
 
                 if analysis["status"] == "OVERBOUGHT":
                     return self._create_trade_signal("DIGITUNDER", symbol, 8, operational_stake)
                 elif analysis["status"] == "OVERSOLD":
                     return self._create_trade_signal("DIGITOVER", symbol, 1, operational_stake)
-
+        
         return None
 
-    def on_trade_result(self, result: str, profit: float = 0.0):
-        self.daily_trades += 1
-        self.daily_pnl += profit
-
+    def on_trade_result(self, result: str):
+        """Gerencia o pós-operação com emojis e pausas."""
         current_time = time.time()
-        self.tick_histories.clear()
+        self.tick_histories.clear() # Limpa para nova análise Sniper do zero
 
         if result == "WIN":
-            self.logger.info("🎉 WIN! Subindo nível 1-3-2-6")
-            self.current_level = (self.current_level + 1) % 4
-            self.global_pause_until = current_time + 45
+            self.logger.info("--- [💰💰💰 WIN!] Alvo atingido. Resetando stake. ---")
+            self.global_pause_until = current_time + 30
+            self.current_stake = self.initial_stake
+            self.consecutive_losses = 0
         else:
-            self.logger.info("❌ LOSS – Resetando para stake inicial")
-            self.current_level = 0
-            self.global_pause_until = current_time + 90  # pausa maior após loss
+            self.logger.info("--- [😡 LOSS] Falha no disparo. Iniciando recuperação. ---")
+            self.global_pause_until = current_time + 60 
+            self.consecutive_losses += 1
+            # Martingale aplicado sobre o stake base
+            self.current_stake = round(self.current_stake * self.martingale_multiplier, 2)
 
-        self.current_stake = round(self.initial_stake * self.sequence_1236[self.current_level], 2)
-
-    def _create_trade_signal(self, contract_type, symbol, barrier, amount):
+    def _create_trade_signal(self, contract_type: str, symbol: str, barrier: Any, amount: float) -> Dict[str, Any]:
         return {
             "contract_type": contract_type,
-            "amount": amount,
+            "amount": float(amount),
             "barrier": str(barrier),
             "duration": 1,
             "duration_unit": "t",

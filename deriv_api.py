@@ -1,5 +1,4 @@
-# deriv_api.py - Versão Robusta com Reconexão Automática
-
+# deriv_api.py - Versão Ultra Robusta com Reconexão e Heartbeat
 import websocket
 import json
 import threading
@@ -17,12 +16,15 @@ class DerivAPI:
         self.ws_url = f"wss://ws.derivws.com/websockets/v3?app_id={app_id}"
         self.ws = None
         self.is_connected = False
+        self.is_authorized = False
         self.callbacks = {}
         self.logger = logging.getLogger(__name__)
         self.loop = None
         self.active_contract_id = None
         self.ws_thread = None
         self.should_reconnect = True
+        self.last_tick_time = time.time()
+        self.subscribed_symbols = set()
 
     def connect(self):
         self.logger.info("A tentar conectar à Deriv API...")
@@ -34,13 +36,17 @@ class DerivAPI:
                 on_error=self._on_error,
                 on_close=self._on_close
             )
-            self.ws_thread = threading.Thread(target=self.ws.run_forever)
+            # ping_interval e ping_timeout ajudam a manter a conexão viva e detectar quedas
+            self.ws_thread = threading.Thread(target=self.ws.run_forever, kwargs={
+                "ping_interval": 30,
+                "ping_timeout": 10
+            })
             self.ws_thread.daemon = True
             self.ws_thread.start()
             
-            # Espera um pouco para a conexão ser estabelecida
-            for _ in range(10):
-                if self.is_connected:
+            # Espera a conexão e autorização
+            for _ in range(15):
+                if self.is_connected and self.is_authorized:
                     break
                 time.sleep(1)
             
@@ -66,12 +72,17 @@ class DerivAPI:
             msg_type = data.get("msg_type")
 
             if msg_type == "tick":
+                self.last_tick_time = time.time()
                 if "tick" in self.callbacks and self.loop:
                     asyncio.run_coroutine_threadsafe(self.callbacks["tick"](data.get("tick")), self.loop)
             
             elif msg_type == "authorize":
                 if not data.get("error"):
+                    self.is_authorized = True
                     self.logger.info("Autorização bem-sucedida")
+                    # Re-subscreve aos símbolos após reconexão
+                    for symbol in self.subscribed_symbols:
+                        self.subscribe_to_ticks(symbol)
                 else:
                     self.logger.error(f"Erro de autorização: {data['error']['message']}")
             
@@ -100,10 +111,10 @@ class DerivAPI:
 
     def _on_close(self, ws, close_status_code, close_msg):
         self.is_connected = False
+        self.is_authorized = False
         if self.should_reconnect:
-            self.logger.warning("Conexão WebSocket fechada. A tentar reconectar em 5 segundos...")
+            self.logger.warning(f"Conexão WebSocket fechada ({close_status_code}: {close_msg}). A tentar reconectar em 5 segundos...")
             time.sleep(5)
-            # Reconectar em uma nova thread para não bloquear a thread de fechamento
             threading.Thread(target=self.connect).start()
 
     def authorize(self):
@@ -122,16 +133,16 @@ class DerivAPI:
             return False
 
     def subscribe_to_ticks(self, symbol: str):
+        self.subscribed_symbols.add(symbol)
         message = {"ticks": symbol, "subscribe": 1}
         return self.send_message(message)
         
     def buy_contract(self, contract_type: str, amount: float, barrier: str, 
                      duration: int, duration_unit: str, symbol: str):
-        """Função correta para comprar um contrato de dígito."""
         self.logger.info(f"A enviar ordem de compra: {contract_type} {symbol} | Barreira: {barrier} | Valor: {amount}")
         message = {
             "buy": 1,
-            "price": 10000, # Um valor alto para garantir que o preço seja aceite
+            "price": 10000,
             "parameters": {
                 "amount": amount,
                 "basis": "stake",

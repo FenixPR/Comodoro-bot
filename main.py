@@ -4,6 +4,7 @@ import sys
 import signal
 import time
 import asyncio
+from datetime import datetime, time as dt_time
 from dotenv import load_dotenv
 from flask import Flask
 from threading import Thread
@@ -32,16 +33,13 @@ class TradingBotMain:
         config_path = os.path.join(script_dir, "bot_config.json")
         self.config_manager = ConfigManager(config_path)
 
-        # --- FORÇA A LEITURA DAS VARIÁVEIS DO RENDER ---
-        # Se estas variáveis existirem no Render, elas SOBRESCREVEM o arquivo JSON
         deriv_app_id = os.getenv("DERIV_APP_ID")
         deriv_token = os.getenv("DERIV_API_TOKEN")
         tg_token = os.getenv("TELEGRAM_BOT_TOKEN")
         tg_chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
         if not deriv_app_id or not deriv_token:
-            self.logger.error("ERRO CRÍTICO: DERIV_APP_ID ou DERIV_API_TOKEN não encontrados no Render!")
-            # Tenta pegar do config manager como última esperança
+            self.logger.error("ERRO CRÍTICO: DERIV_APP_ID ou DERIV_API_TOKEN não encontrados!")
             deriv_app_id = deriv_app_id or self.config_manager.get("deriv.app_id")
             deriv_token = deriv_token or self.config_manager.get("deriv.api_token")
 
@@ -56,7 +54,6 @@ class TradingBotMain:
         
         self.trading_strategy = TradingStrategy(self.config_manager)
         
-        # Estatísticas para o relatório de 1 hora
         self.total_profit = 0.0
         self.total_wins = 0
         self.total_losses = 0
@@ -66,16 +63,49 @@ class TradingBotMain:
         self.shutdown_requested = False
         self.is_paused = False
         self.pause_end_time = 0
+        
+        # Horário de operação (13:30 às 17:00)
+        self.start_time = dt_time(13, 30)
+        self.end_time = dt_time(17, 0)
 
     def setup_logging(self):
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s',
                             handlers=[logging.StreamHandler(sys.stdout)])
 
+    def is_within_operating_hours(self):
+        now = datetime.now().time()
+        return self.start_time <= now <= self.end_time
+
+    async def watchdog_loop(self):
+        """Monitora se o bot parou de receber ticks e tenta reconectar."""
+        while not self.shutdown_requested:
+            await asyncio.sleep(60)
+            if self.is_running and (time.time() - self.deriv_api.last_tick_time > 120):
+                self.logger.warning("Watchdog: Nenhum tick recebido em 2 minutos. Reiniciando conexão...")
+                self.deriv_api.disconnect()
+                await asyncio.sleep(5)
+                self.deriv_api.should_reconnect = True
+                self.deriv_api.connect()
+
+    async def scheduler_loop(self):
+        """Gerencia o início e fim automático das operações."""
+        while not self.shutdown_requested:
+            is_time = self.is_within_operating_hours()
+            if is_time and not self.is_running:
+                self.logger.info("Horário de operação atingido. Iniciando bot automaticamente.")
+                await self.start_trading()
+                await self.telegram_bot.send_status_message("⏰ <b>Início Automático:</b> Horário de operação atingido (13:30).")
+            elif not is_time and self.is_running:
+                self.logger.info("Fora do horário de operação. Parando bot automaticamente.")
+                await self.stop_trading()
+                await self.telegram_bot.send_status_message("⏰ <b>Fim Automático:</b> Horário de operação encerrado (17:00).")
+            await asyncio.sleep(30)
+
     async def start(self):
         try:
             self.logger.info("Iniciando conexão com Deriv...")
             if not self.deriv_api.connect(): 
-                raise Exception("Não foi possível conectar à Deriv. Verifique o Token e o App ID.")
+                raise Exception("Não foi possível conectar à Deriv.")
             
             self.deriv_api.set_callback("tick", self.on_tick_received, asyncio.get_running_loop())
             self.deriv_api.set_callback("trade_result", self.on_trade_result, asyncio.get_running_loop())
@@ -84,8 +114,10 @@ class TradingBotMain:
             
             asyncio.create_task(self.telegram_bot.run_polling())
             asyncio.create_task(self.hourly_report_loop())
+            asyncio.create_task(self.scheduler_loop())
+            asyncio.create_task(self.watchdog_loop())
             
-            self.logger.info("Bot pronto! Aguardando comando /start_bot no Telegram.")
+            self.logger.info("Bot pronto e monitorando horários.")
             
             while not self.shutdown_requested:
                 if self.is_running and self.is_paused and time.time() >= self.pause_end_time:
@@ -98,7 +130,7 @@ class TradingBotMain:
 
     async def hourly_report_loop(self):
         while not self.shutdown_requested:
-            await asyncio.sleep(3600) # 1 hora
+            await asyncio.sleep(3600)
             if self.total_wins + self.total_losses > 0:
                 await self.telegram_bot.send_hourly_report(
                     self.total_profit, self.total_wins, self.total_losses
@@ -129,20 +161,18 @@ class TradingBotMain:
 
     async def start_trading(self): 
         self.is_running = True
-        self.logger.info("Operações iniciadas via Telegram.")
+        self.logger.info("Operações iniciadas.")
 
     async def stop_trading(self): 
         self.is_running = False
-        self.logger.info("Operações paradas via Telegram.")
+        self.logger.info("Operações paradas.")
 
     def stop(self): 
         self.shutdown_requested = True
         self.deriv_api.disconnect()
 
 if __name__ == "__main__":
-    # Inicia Web Server para o Render/UptimeRobot
     Thread(target=run_web, daemon=True).start()
-    
     bot = TradingBotMain()
     try: 
         asyncio.run(bot.start())

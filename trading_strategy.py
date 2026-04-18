@@ -47,12 +47,12 @@ class TradingStrategy:
             analysis = self.tech_analyzer.analyze_trend(self.tick_histories[symbol])
             score = analysis.get("confianca_score", 0)
             
-            # SÓ ENTRA SE O SCORE FOR 7 OU MAIS (FILTRO SNIPER)
-            if score >= 7:
+            # SÓ ENTRA SE O SCORE FOR 9 OU MAIS (FILTRO SNIPER ULTRA)
+            if score >= 9:
                 operational_stake = self.current_stake
                 
-                # LÓGICA DE CONFIANÇA: Se score >= 8, dobra a entrada (ex: 0.60 -> 1.20)
-                if score >= 8:
+                # LÓGICA DE CONFIANÇA: Se score >= 10, dobra a entrada (ex: 0.60 -> 1.20)
+                if score >= 10:
                     operational_stake = round(self.current_stake * 2.0, 2)
                     self.logger.info(f"🎯 Sniper focado! Confiança Score {score}. Aumentando stake para ${operational_stake}")
 
@@ -70,12 +70,14 @@ class TradingStrategy:
 
         if result == "WIN":
             self.logger.info("--- [💰💰💰 WIN!] Alvo atingido. Resetando stake. ---")
-            self.global_pause_until = current_time + 30
+            # Pausa maior após WIN para evitar "overtrading" e pegar reversões falsas
+            self.global_pause_until = current_time + 120
             self.current_stake = self.initial_stake
             self.consecutive_losses = 0
         else:
             self.logger.info("--- [😡 LOSS] Falha no disparo. Iniciando recuperação. ---")
-            self.global_pause_until = current_time + 60 
+            # Pausa muito maior após LOSS para o mercado se estabilizar
+            self.global_pause_until = current_time + 300 
             self.consecutive_losses += 1
             # Martingale aplicado sobre o stake base
             self.current_stake = round(self.current_stake * self.martingale_multiplier, 2)

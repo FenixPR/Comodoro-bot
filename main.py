@@ -5,6 +5,7 @@ import signal
 import time
 import asyncio
 from datetime import datetime, time as dt_time
+import pytz
 from dotenv import load_dotenv
 from flask import Flask
 from threading import Thread
@@ -73,7 +74,10 @@ class TradingBotMain:
                             handlers=[logging.StreamHandler(sys.stdout)])
 
     def is_within_operating_hours(self):
-        now = datetime.now().time()
+        # Define o fuso horário de Brasília
+        tz_br = pytz.timezone('America/Sao_Paulo')
+        # Obtém o horário atual em Brasília
+        now = datetime.now(tz_br).time()
         return self.start_time <= now <= self.end_time
 
     async def watchdog_loop(self):

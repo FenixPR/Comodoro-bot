@@ -31,24 +31,24 @@ class TechnicalAnalyzer:
         score = 0
         status = "NEUTRAL"
 
-        # FILTRO SNIPER: Níveis muito mais rigorosos (82/18) para reduzir losses
-        if rsi >= 82: 
+        # FILTRO SNIPER ULTRA: Níveis extremos (88/12) para máxima assertividade
+        if rsi >= 88: 
             status = "OVERBOUGHT"
-            score = 7 # Score base para Sniper
-            if rsi >= 88: score += 2 # Exaustão severa
-            if rsi >= 93: score += 1 # "Certeza" estatística máxima
+            score = 8 # Score base aumentado para Sniper Ultra
+            if rsi >= 92: score += 1 # Exaustão severa
+            if rsi >= 96: score += 1 # "Certeza" estatística máxima
             
-        elif rsi <= 18:
+        elif rsi <= 12:
             status = "OVERSOLD"
-            score = 7
-            if rsi <= 12: score += 2
-            if rsi <= 7: score += 1
+            score = 8
+            if rsi <= 8: score += 1
+            if rsi <= 4: score += 1
 
-        # Validação de micro-tendência (os últimos 3 ticks devem confirmar a direção)
-        if len(prices) >= 3:
-            if status == "OVERBOUGHT" and prices[-1] > prices[-2] > prices[-3]:
+        # Validação de micro-tendência (os últimos 5 ticks devem confirmar a exaustão)
+        if len(prices) >= 5:
+            if status == "OVERBOUGHT" and all(prices[i] > prices[i-1] for i in range(-4, 0)):
                 score = min(10, score + 1)
-            elif status == "OVERSOLD" and prices[-1] < prices[-2] < prices[-3]:
+            elif status == "OVERSOLD" and all(prices[i] < prices[i-1] for i in range(-4, 0)):
                 score = min(10, score + 1)
 
         # Se o score for menor que 7, o Sniper não atira
